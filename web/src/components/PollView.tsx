@@ -69,10 +69,39 @@ export function PollView({ poll: initialPoll, currentUser, isOwner, onVote, onCl
   }
 
   function copyLink() {
-    navigator.clipboard.writeText(shareUrl).then(() => {
+    // Try modern clipboard API first, fall back to execCommand
+    const doCopy = () => {
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
+      setTimeout(() => setCopied(false), 2500);
+    };
+
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(shareUrl).then(doCopy).catch(() => {
+        fallbackCopy();
+      });
+    } else {
+      fallbackCopy();
+    }
+  }
+
+  function fallbackCopy() {
+    const el = document.createElement("textarea");
+    el.value = shareUrl;
+    el.style.position = "fixed";
+    el.style.top = "-9999px";
+    el.style.left = "-9999px";
+    document.body.appendChild(el);
+    el.focus();
+    el.select();
+    try {
+      document.execCommand("copy");
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    } catch {
+      // Last resort: select the text in the URL input so user can copy manually
+    } finally {
+      document.body.removeChild(el);
+    }
   }
 
   // Tally votes
@@ -87,7 +116,6 @@ export function PollView({ poll: initialPoll, currentUser, isOwner, onVote, onCl
   const winners = poll.options.filter(o => tally[o] === maxVotes && tally[o] > 0);
 
   const showResults = voted || poll.closed;
-
   const secondsAgo = Math.round((Date.now() - lastRefresh) / 1000);
 
   return (
@@ -119,14 +147,9 @@ export function PollView({ poll: initialPoll, currentUser, isOwner, onVote, onCl
       <h1 className="text-2xl font-bold mb-1" style={{ fontFamily: "Fraunces, serif" }}>
         {poll.question}
       </h1>
-      {poll.multiVote && !showResults && (
+      {!showResults && (
         <p className="text-sm mb-6" style={{ color: "var(--muted)" }}>
-          You can select multiple options.
-        </p>
-      )}
-      {!poll.multiVote && !showResults && (
-        <p className="text-sm mb-6" style={{ color: "var(--muted)" }}>
-          Pick one option.
+          {poll.multiVote ? "You can select multiple options." : "Pick one option."}
         </p>
       )}
       {showResults && (
@@ -149,7 +172,7 @@ export function PollView({ poll: initialPoll, currentUser, isOwner, onVote, onCl
       <div className="flex flex-col gap-3 mb-6">
         {poll.options.map(opt => {
           const count = tally[opt];
-          const pct = totalVoters > 0 ? Math.round((count / (poll.multiVote ? totalVoters : totalVoters)) * 100) : 0;
+          const pct = totalVoters > 0 ? Math.round((count / totalVoters) * 100) : 0;
           const barPct = maxVotes > 0 ? Math.round((count / maxVotes) * 100) : 0;
           const isWinner = poll.closed && winners.includes(opt) && totalVoters > 0;
           const isSelected = selected.includes(opt);
@@ -240,10 +263,15 @@ export function PollView({ poll: initialPoll, currentUser, isOwner, onVote, onCl
         className="flex items-center gap-2 px-4 py-3 rounded-xl mb-4"
         style={{ background: "var(--panel)", border: "1px solid var(--line)" }}
       >
-        <span className="flex-1 text-xs truncate" style={{ color: "var(--muted)", fontFamily: "monospace" }}>
-          {shareUrl}
-        </span>
+        <input
+          readOnly
+          value={shareUrl}
+          onFocus={e => e.target.select()}
+          className="flex-1 text-xs bg-transparent outline-none min-w-0"
+          style={{ color: "var(--muted)", fontFamily: "monospace" }}
+        />
         <button
+          type="button"
           onClick={copyLink}
           className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
           style={{
