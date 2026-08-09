@@ -48,7 +48,8 @@ export default function App() {
   const [loadingPoll, setLoadingPoll] = useState(false);
   const [isOwner, setIsOwner] = useState(false);
   const [pollError, setPollError] = useState("");
-  const didLoadPollRef = useRef(false);
+  const initialPollId = useRef(getPollIdFromUrl()); // capture once on mount
+  const didInit = useRef(false);
 
   const userId = user ? getUserId(user as Record<string, unknown>) : "";
 
@@ -77,39 +78,33 @@ export default function App() {
     }
   }, [user]);
 
+  // One-time init after auth resolves
   useEffect(() => {
-    if (authLoading || !user || didLoadPollRef.current) return;
+    if (authLoading || !user || didInit.current) return;
+    didInit.current = true;
 
-    const pollId = getPollIdFromUrl();
-    if (!pollId) {
+    const pollId = initialPollId.current;
+    // Always clean the URL param now
+    setUrlPoll(null);
+
+    if (pollId) {
+      setLoadingPoll(true);
+      loadPoll(pollId).then(poll => {
+        setLoadingPoll(false);
+        if (poll) {
+          setActivePoll(poll);
+          setIsOwner(poll.createdBy === getUserId(user as Record<string, unknown>));
+          setUrlPoll(poll.id);
+          setView("poll");
+        } else {
+          setPollError("This poll link has expired or no longer exists. Create a new poll below.");
+        }
+        loadMyPolls();
+      });
+    } else {
       loadMyPolls();
-      return;
     }
-
-    didLoadPollRef.current = true;
-    setLoadingPoll(true);
-    loadPoll(pollId).then(poll => {
-      setLoadingPoll(false);
-      setUrlPoll(null); // clean URL regardless
-      if (poll) {
-        setActivePoll(poll);
-        setIsOwner(poll.createdBy === getUserId(user as Record<string, unknown>));
-        setView("poll");
-      } else {
-        setPollError(
-          "This poll link is expired or was created before a recent update. Please ask the poll creator to share a new link."
-        );
-        setView("home");
-      }
-      loadMyPolls();
-    });
   }, [authLoading, user, loadPoll, loadMyPolls]);
-
-  useEffect(() => {
-    if (user && !getPollIdFromUrl() && !didLoadPollRef.current) {
-      loadMyPolls();
-    }
-  }, [user, loadMyPolls]);
 
   async function handleCreated(poll: Poll) {
     if (!user) return;
@@ -118,6 +113,7 @@ export default function App() {
     setActivePoll(poll);
     setIsOwner(true);
     setUrlPoll(poll.id);
+    setPollError("");
     setView("poll");
   }
 
@@ -154,9 +150,9 @@ export default function App() {
   }
 
   function goCreate() {
-    setPollError("");
     setView("create");
     setActivePoll(null);
+    setPollError("");
     setUrlPoll(null);
   }
 
@@ -234,7 +230,6 @@ export default function App() {
           <h1 className="text-4xl font-bold mb-3" style={{ fontFamily: "Fraunces, serif" }}>
             VotePool
           </h1>
-
           {pollId ? (
             <>
               <div
@@ -321,26 +316,24 @@ export default function App() {
         </div>
       </div>
 
-      {pollError && (
-        <div className="max-w-xl mx-auto mb-6 px-5 py-4 rounded-2xl text-sm" style={{ background: "var(--panel)", border: "2px solid var(--line)" }}>
-          <p className="font-bold mb-1">🔗 This poll link has expired</p>
+      {/* Only show poll error if we actually tried to load a poll from a link */}
+      {pollError && view === "home" && (
+        <div className="max-w-xl mx-auto mb-6 px-5 py-4 rounded-2xl text-sm"
+          style={{ background: "var(--panel)", border: "1px solid var(--line)" }}>
+          <p className="font-semibold mb-1">🔗 Poll link expired</p>
           <p style={{ color: "var(--muted)" }}>{pollError}</p>
           <button
             onClick={goCreate}
             className="mt-3 px-4 py-2 rounded-xl text-sm font-semibold transition-opacity hover:opacity-80"
             style={{ background: "var(--accent)", color: "#fff" }}
           >
-            Create a New Poll
+            ➕ Create a New Poll
           </button>
         </div>
       )}
 
-      {view === "home" && (
-        <MyPolls polls={myPolls} onSelect={selectPoll} onNew={goCreate} />
-      )}
-      {view === "create" && (
-        <CreatePoll onCreated={handleCreated} username={userId} />
-      )}
+      {view === "home" && <MyPolls polls={myPolls} onSelect={selectPoll} onNew={goCreate} />}
+      {view === "create" && <CreatePoll onCreated={handleCreated} username={userId} />}
       {view === "poll" && activePoll && (
         <PollView
           poll={activePoll}
