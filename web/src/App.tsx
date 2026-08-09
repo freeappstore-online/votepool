@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { initApp } from "@freeappstore/sdk";
 import { useAuth } from "@freeappstore/sdk/hooks";
 import { Shell } from "./components/Shell";
@@ -37,6 +37,18 @@ export default function App() {
   const [activePoll, setActivePoll] = useState<Poll | null>(null);
   const [loadingPoll, setLoadingPoll] = useState(false);
   const [isOwner, setIsOwner] = useState(false);
+  const [pollError, setPollError] = useState("");
+  const didLoadPollRef = useRef(false);
+
+  // Load a specific poll by ID
+  const loadPoll = useCallback(async (pollId: string): Promise<Poll | null> => {
+    try {
+      const poll = await fas.kv.get<Poll>(`poll:${pollId}`);
+      return poll ?? null;
+    } catch {
+      return null;
+    }
+  }, []);
 
   // Load my polls from KV
   const loadMyPolls = useCallback(async () => {
@@ -55,36 +67,40 @@ export default function App() {
     }
   }, [user]);
 
-  // Load a specific poll by ID
-  const loadPoll = useCallback(async (pollId: string): Promise<Poll | null> => {
-    try {
-      const poll = await fas.kv.get<Poll>(`poll:${pollId}`);
-      return poll ?? null;
-    } catch {
-      return null;
-    }
-  }, []);
-
-  // On mount: check URL for poll param
+  // Once auth resolves and user is signed in, check URL for poll param
   useEffect(() => {
-    if (authLoading) return;
+    if (authLoading || !user || didLoadPollRef.current) return;
+
     const pollId = getPollIdFromUrl();
-    if (pollId && user) {
-      setLoadingPoll(true);
-      loadPoll(pollId).then(poll => {
-        if (poll) {
-          setActivePoll(poll);
-          setIsOwner(poll.createdBy === user.username);
-          setView("poll");
-        }
-        setLoadingPoll(false);
-      });
+    if (!pollId) {
+      // No poll in URL — just load their polls
+      loadMyPolls();
+      return;
     }
-  }, [authLoading, user, loadPoll]);
 
-  // Load my polls when user logs in
+    // There's a poll ID in the URL — load and show it
+    didLoadPollRef.current = true;
+    setLoadingPoll(true);
+    loadPoll(pollId).then(poll => {
+      setLoadingPoll(false);
+      if (poll) {
+        setActivePoll(poll);
+        setIsOwner(poll.createdBy === user.username);
+        setView("poll");
+        loadMyPolls();
+      } else {
+        setPollError(`Poll not found. It may have been deleted.`);
+        setView("home");
+        loadMyPolls();
+      }
+    });
+  }, [authLoading, user, loadPoll, loadMyPolls]);
+
+  // Also load my polls whenever user changes (e.g. on sign-in without a poll URL)
   useEffect(() => {
-    if (user) loadMyPolls();
+    if (user && !getPollIdFromUrl()) {
+      loadMyPolls();
+    }
   }, [user, loadMyPolls]);
 
   async function handleCreated(poll: Poll) {
@@ -125,12 +141,14 @@ export default function App() {
   function goHome() {
     setView("home");
     setActivePoll(null);
+    setPollError("");
     setUrlPoll(null);
   }
 
   function goCreate() {
     setView("create");
     setActivePoll(null);
+    setPollError("");
     setUrlPoll(null);
   }
 
@@ -182,38 +200,6 @@ export default function App() {
     </div>
   ) : null;
 
-  // Mobile nav
-  const mobileNav = user ? (
-    <>
-      <button
-        onClick={goHome}
-        className="flex flex-col items-center gap-0.5 px-3 py-1 text-xs"
-        style={{ color: view === "home" ? "var(--accent)" : "var(--muted)" }}
-      >
-        <span className="text-xl">📋</span>
-        My Polls
-      </button>
-      <button
-        onClick={goCreate}
-        className="flex flex-col items-center gap-0.5 px-3 py-1 text-xs"
-        style={{ color: view === "create" ? "var(--accent)" : "var(--muted)" }}
-      >
-        <span className="text-xl">➕</span>
-        New Poll
-      </button>
-      {activePoll && (
-        <button
-          onClick={() => setView("poll")}
-          className="flex flex-col items-center gap-0.5 px-3 py-1 text-xs"
-          style={{ color: view === "poll" ? "var(--accent)" : "var(--muted)" }}
-        >
-          <span className="text-xl">🗳️</span>
-          Vote
-        </button>
-      )}
-    </>
-  ) : null;
-
   // Loading state
   if (authLoading || loadingPoll) {
     return (
@@ -221,14 +207,16 @@ export default function App() {
         <div className="flex items-center justify-center h-64">
           <div className="text-center">
             <div className="text-4xl mb-4 animate-pulse">🗳️</div>
-            <p style={{ color: "var(--muted)" }}>Loading…</p>
+            <p style={{ color: "var(--muted)" }}>
+              {loadingPoll ? "Loading poll…" : "Loading…"}
+            </p>
           </div>
         </div>
       </Shell>
     );
   }
 
-  // Not signed in
+  // Not signed in — show landing page, preserving the poll link context
   if (!user) {
     const pollId = getPollIdFromUrl();
     return (
@@ -238,36 +226,60 @@ export default function App() {
           <h1 className="text-4xl font-bold mb-3" style={{ fontFamily: "Fraunces, serif" }}>
             VotePool
           </h1>
-          <p className="text-lg mb-2" style={{ color: "var(--muted)" }}>
-            Create polls, share a unique link, and see who wins — in real time.
-          </p>
-          {pollId && (
-            <p className="mb-6 px-4 py-3 rounded-xl text-sm font-medium"
-              style={{ background: "var(--panel)", border: "1px solid var(--line)", color: "var(--ink)" }}>
-              📩 You've been invited to vote on a poll. Sign in to participate!
-            </p>
+
+          {pollId ? (
+            <>
+              <div
+                className="mb-6 px-5 py-4 rounded-2xl text-left"
+                style={{ background: "var(--panel)", border: "2px solid var(--accent)" }}
+              >
+                <p className="font-bold mb-1">📩 You've been invited to vote!</p>
+                <p className="text-sm" style={{ color: "var(--muted)" }}>
+                  Sign in with GitHub to see the poll and cast your vote. It's free and takes one tap.
+                </p>
+              </div>
+              <button
+                onClick={() => fas.auth.signIn()}
+                className="w-full py-4 rounded-xl font-bold text-lg transition-opacity hover:opacity-90 mb-3"
+                style={{ background: "var(--accent)", color: "#fff" }}
+              >
+                Sign in to Vote →
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="text-lg mb-8" style={{ color: "var(--muted)" }}>
+                Create polls, share a unique link, and see who wins — in real time.
+              </p>
+              <div className="flex flex-col gap-3 text-sm mb-8 text-left">
+                {[
+                  "Create a poll with your question & options",
+                  "Share the unique link with anyone",
+                  "Watch votes come in live",
+                  "Close the poll to reveal the winner",
+                ].map((step, i) => (
+                  <div key={i} className="flex items-center gap-3">
+                    <span
+                      className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
+                      style={{ background: "var(--accent)", color: "#fff" }}
+                    >
+                      {i + 1}
+                    </span>
+                    <span>{step}</span>
+                  </div>
+                ))}
+              </div>
+              <button
+                onClick={() => fas.auth.signIn()}
+                className="w-full py-4 rounded-xl font-bold text-lg transition-opacity hover:opacity-90 mb-3"
+                style={{ background: "var(--accent)", color: "#fff" }}
+              >
+                Sign in with GitHub to Get Started
+              </button>
+            </>
           )}
-          {!pollId && (
-            <div className="flex flex-col gap-3 text-sm mb-8 text-left px-4">
-              {["Create a poll with your question & options", "Share the unique link with anyone", "Watch votes come in live", "Close the poll to reveal the winner"].map((step, i) => (
-                <div key={i} className="flex items-center gap-3">
-                  <span className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
-                    style={{ background: "var(--accent)", color: "#fff" }}>
-                    {i + 1}
-                  </span>
-                  <span>{step}</span>
-                </div>
-              ))}
-            </div>
-          )}
-          <button
-            onClick={() => fas.auth.signIn()}
-            className="px-8 py-4 rounded-xl font-bold text-lg transition-opacity hover:opacity-90"
-            style={{ background: "var(--accent)", color: "#fff" }}
-          >
-            Sign in with GitHub to {pollId ? "Vote" : "Get Started"}
-          </button>
-          <p className="mt-4 text-xs" style={{ color: "var(--muted)" }}>
+
+          <p className="text-xs" style={{ color: "var(--muted)" }}>
             Free · No ads · No tracking
           </p>
         </div>
@@ -277,19 +289,40 @@ export default function App() {
 
   return (
     <Shell nav={navItems} title="VotePool">
-      {/* Desktop: show nav inline; mobile: bottom nav handled by Shell */}
+      {/* Mobile top nav */}
       <div className="md:hidden mb-4">
         <div className="flex gap-2">
-          <button onClick={goHome} className="flex-1 py-2 rounded-xl text-sm font-semibold text-center transition-all"
-            style={{ background: view === "home" ? "var(--accent)" : "var(--line)", color: view === "home" ? "#fff" : "var(--ink)" }}>
+          <button
+            onClick={goHome}
+            className="flex-1 py-2 rounded-xl text-sm font-semibold text-center transition-all"
+            style={{
+              background: view === "home" ? "var(--accent)" : "var(--line)",
+              color: view === "home" ? "#fff" : "var(--ink)",
+            }}
+          >
             📋 My Polls
           </button>
-          <button onClick={goCreate} className="flex-1 py-2 rounded-xl text-sm font-semibold text-center transition-all"
-            style={{ background: view === "create" ? "var(--accent)" : "var(--line)", color: view === "create" ? "#fff" : "var(--ink)" }}>
+          <button
+            onClick={goCreate}
+            className="flex-1 py-2 rounded-xl text-sm font-semibold text-center transition-all"
+            style={{
+              background: view === "create" ? "var(--accent)" : "var(--line)",
+              color: view === "create" ? "#fff" : "var(--ink)",
+            }}
+          >
             ➕ New Poll
           </button>
         </div>
       </div>
+
+      {pollError && (
+        <div
+          className="max-w-xl mx-auto mb-4 px-4 py-3 rounded-xl text-sm font-medium"
+          style={{ background: "var(--error)", color: "#fff" }}
+        >
+          ⚠️ {pollError}
+        </div>
+      )}
 
       {view === "home" && (
         <MyPolls polls={myPolls} onSelect={selectPoll} onNew={goCreate} />
