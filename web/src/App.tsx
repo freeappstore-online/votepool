@@ -30,6 +30,18 @@ function setUrlPoll(pollId: string | null) {
   window.history.replaceState({}, "", url.toString());
 }
 
+// Safely extract a display name from whatever the auth user object looks like
+function getUserId(user: Record<string, unknown>): string {
+  return (
+    (user.username as string) ||
+    (user.login as string) ||
+    (user.name as string) ||
+    (user.email as string) ||
+    (user.id as string) ||
+    "anonymous"
+  );
+}
+
 export default function App() {
   const { user, loading: authLoading } = useAuth(fas);
   const [view, setView] = useState<View>("home");
@@ -39,6 +51,8 @@ export default function App() {
   const [isOwner, setIsOwner] = useState(false);
   const [pollError, setPollError] = useState("");
   const didLoadPollRef = useRef(false);
+
+  const userId = user ? getUserId(user as Record<string, unknown>) : "";
 
   // Load a specific poll by ID
   const loadPoll = useCallback(async (pollId: string): Promise<Poll | null> => {
@@ -58,7 +72,7 @@ export default function App() {
       const polls: Poll[] = [];
       for (const key of keys) {
         const p = await fas.kv.get<Poll>(key);
-        if (p && p.createdBy === user.username) polls.push(p);
+        if (p && p.createdBy === getUserId(user as Record<string, unknown>)) polls.push(p);
       }
       polls.sort((a, b) => b.createdAt - a.createdAt);
       setMyPolls(polls);
@@ -73,32 +87,31 @@ export default function App() {
 
     const pollId = getPollIdFromUrl();
     if (!pollId) {
-      // No poll in URL — just load their polls
       loadMyPolls();
       return;
     }
 
-    // There's a poll ID in the URL — load and show it
     didLoadPollRef.current = true;
     setLoadingPoll(true);
     loadPoll(pollId).then(poll => {
       setLoadingPoll(false);
       if (poll) {
         setActivePoll(poll);
-        setIsOwner(poll.createdBy === user.username);
+        setIsOwner(poll.createdBy === getUserId(user as Record<string, unknown>));
         setView("poll");
         loadMyPolls();
       } else {
-        setPollError(`Poll not found. It may have been deleted.`);
+        setPollError("Poll not found. It may have been deleted or the link is incorrect.");
+        setUrlPoll(null);
         setView("home");
         loadMyPolls();
       }
     });
   }, [authLoading, user, loadPoll, loadMyPolls]);
 
-  // Also load my polls whenever user changes (e.g. on sign-in without a poll URL)
+  // Load my polls when user signs in without a poll URL
   useEffect(() => {
-    if (user && !getPollIdFromUrl()) {
+    if (user && !getPollIdFromUrl() && !didLoadPollRef.current) {
       loadMyPolls();
     }
   }, [user, loadMyPolls]);
@@ -117,7 +130,7 @@ export default function App() {
     if (!user) return;
     const poll = await loadPoll(pollId);
     if (!poll || poll.closed) return;
-    poll.votes[user.username] = selections;
+    poll.votes[userId] = selections;
     await fas.kv.set(`poll:${pollId}`, poll);
     setActivePoll({ ...poll });
   }
@@ -154,12 +167,12 @@ export default function App() {
 
   function selectPoll(poll: Poll) {
     setActivePoll(poll);
-    setIsOwner(poll.createdBy === (user?.username ?? ""));
+    setIsOwner(poll.createdBy === userId);
     setUrlPoll(poll.id);
     setView("poll");
   }
 
-  // Nav items
+  // Sidebar nav
   const navItems = user ? (
     <div className="flex flex-col gap-1">
       <button
@@ -195,12 +208,15 @@ export default function App() {
         </button>
       )}
       <div className="mt-4 px-3 py-2 rounded-xl text-xs" style={{ background: "var(--line)", color: "var(--muted)" }}>
-        Signed in as <span className="font-semibold" style={{ color: "var(--ink)" }}>@{user.username}</span>
+        Signed in as{" "}
+        <span className="font-semibold" style={{ color: "var(--ink)" }}>
+          {userId ? `@${userId}` : "…"}
+        </span>
       </div>
     </div>
   ) : null;
 
-  // Loading state
+  // Loading
   if (authLoading || loadingPoll) {
     return (
       <Shell nav={navItems} title="VotePool">
@@ -216,7 +232,7 @@ export default function App() {
     );
   }
 
-  // Not signed in — show landing page, preserving the poll link context
+  // Not signed in
   if (!user) {
     const pollId = getPollIdFromUrl();
     return (
@@ -289,7 +305,7 @@ export default function App() {
 
   return (
     <Shell nav={navItems} title="VotePool">
-      {/* Mobile top nav */}
+      {/* Mobile top tabs */}
       <div className="md:hidden mb-4">
         <div className="flex gap-2">
           <button
@@ -327,15 +343,13 @@ export default function App() {
       {view === "home" && (
         <MyPolls polls={myPolls} onSelect={selectPoll} onNew={goCreate} />
       )}
-
       {view === "create" && (
-        <CreatePoll onCreated={handleCreated} username={user.username} />
+        <CreatePoll onCreated={handleCreated} username={userId} />
       )}
-
       {view === "poll" && activePoll && (
         <PollView
           poll={activePoll}
-          currentUser={user.username}
+          currentUser={userId}
           isOwner={isOwner}
           onVote={handleVote}
           onClose={handleClose}
