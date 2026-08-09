@@ -30,15 +30,13 @@ function setUrlPoll(pollId: string | null) {
   window.history.replaceState({}, "", url.toString());
 }
 
-// Safely extract a display name from whatever the auth user object looks like
 function getUserId(user: Record<string, unknown>): string {
   return (
     (user.username as string) ||
     (user.login as string) ||
     (user.name as string) ||
     (user.email as string) ||
-    (user.id as string) ||
-    "anonymous"
+    String(user.id ?? "anonymous")
   );
 }
 
@@ -54,7 +52,6 @@ export default function App() {
 
   const userId = user ? getUserId(user as Record<string, unknown>) : "";
 
-  // Load a specific poll by ID
   const loadPoll = useCallback(async (pollId: string): Promise<Poll | null> => {
     try {
       const poll = await fas.kv.get<Poll>(`poll:${pollId}`);
@@ -64,7 +61,6 @@ export default function App() {
     }
   }, []);
 
-  // Load my polls from KV
   const loadMyPolls = useCallback(async () => {
     if (!user) return;
     try {
@@ -81,7 +77,6 @@ export default function App() {
     }
   }, [user]);
 
-  // Once auth resolves and user is signed in, check URL for poll param
   useEffect(() => {
     if (authLoading || !user || didLoadPollRef.current) return;
 
@@ -95,21 +90,21 @@ export default function App() {
     setLoadingPoll(true);
     loadPoll(pollId).then(poll => {
       setLoadingPoll(false);
+      setUrlPoll(null); // clean URL regardless
       if (poll) {
         setActivePoll(poll);
         setIsOwner(poll.createdBy === getUserId(user as Record<string, unknown>));
         setView("poll");
-        loadMyPolls();
       } else {
-        setPollError("Poll not found. It may have been deleted or the link is incorrect.");
-        setUrlPoll(null);
+        setPollError(
+          "This poll link is expired or was created before a recent update. Please ask the poll creator to share a new link."
+        );
         setView("home");
-        loadMyPolls();
       }
+      loadMyPolls();
     });
   }, [authLoading, user, loadPoll, loadMyPolls]);
 
-  // Load my polls when user signs in without a poll URL
   useEffect(() => {
     if (user && !getPollIdFromUrl() && !didLoadPollRef.current) {
       loadMyPolls();
@@ -159,9 +154,9 @@ export default function App() {
   }
 
   function goCreate() {
+    setPollError("");
     setView("create");
     setActivePoll(null);
-    setPollError("");
     setUrlPoll(null);
   }
 
@@ -172,7 +167,6 @@ export default function App() {
     setView("poll");
   }
 
-  // Sidebar nav
   const navItems = user ? (
     <div className="flex flex-col gap-1">
       <button
@@ -210,13 +204,12 @@ export default function App() {
       <div className="mt-4 px-3 py-2 rounded-xl text-xs" style={{ background: "var(--line)", color: "var(--muted)" }}>
         Signed in as{" "}
         <span className="font-semibold" style={{ color: "var(--ink)" }}>
-          {userId ? `@${userId}` : "…"}
+          @{userId}
         </span>
       </div>
     </div>
   ) : null;
 
-  // Loading
   if (authLoading || loadingPoll) {
     return (
       <Shell nav={navItems} title="VotePool">
@@ -232,7 +225,6 @@ export default function App() {
     );
   }
 
-  // Not signed in
   if (!user) {
     const pollId = getPollIdFromUrl();
     return (
@@ -294,7 +286,6 @@ export default function App() {
               </button>
             </>
           )}
-
           <p className="text-xs" style={{ color: "var(--muted)" }}>
             Free · No ads · No tracking
           </p>
@@ -305,7 +296,6 @@ export default function App() {
 
   return (
     <Shell nav={navItems} title="VotePool">
-      {/* Mobile top tabs */}
       <div className="md:hidden mb-4">
         <div className="flex gap-2">
           <button
@@ -332,11 +322,16 @@ export default function App() {
       </div>
 
       {pollError && (
-        <div
-          className="max-w-xl mx-auto mb-4 px-4 py-3 rounded-xl text-sm font-medium"
-          style={{ background: "var(--error)", color: "#fff" }}
-        >
-          ⚠️ {pollError}
+        <div className="max-w-xl mx-auto mb-6 px-5 py-4 rounded-2xl text-sm" style={{ background: "var(--panel)", border: "2px solid var(--line)" }}>
+          <p className="font-bold mb-1">🔗 This poll link has expired</p>
+          <p style={{ color: "var(--muted)" }}>{pollError}</p>
+          <button
+            onClick={goCreate}
+            className="mt-3 px-4 py-2 rounded-xl text-sm font-semibold transition-opacity hover:opacity-80"
+            style={{ background: "var(--accent)", color: "#fff" }}
+          >
+            Create a New Poll
+          </button>
         </div>
       )}
 
