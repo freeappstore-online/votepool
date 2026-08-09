@@ -10,6 +10,7 @@ export function CreatePoll({ onCreated, username }: CreatePollProps) {
   const [question, setQuestion] = useState("");
   const [options, setOptions] = useState(["", ""]);
   const [multiVote, setMultiVote] = useState(false);
+  const [creatorName, setCreatorName] = useState(username !== "me" ? username : "");
   const [error, setError] = useState("");
 
   function addOption() {
@@ -39,7 +40,7 @@ export function CreatePoll({ onCreated, username }: CreatePollProps) {
       question: question.trim(),
       options: filled,
       multiVote,
-      createdBy: username,
+      createdBy: creatorName.trim() || "anonymous",
       createdAt: Date.now(),
       votes: {},
       closed: false,
@@ -50,62 +51,66 @@ export function CreatePoll({ onCreated, username }: CreatePollProps) {
   return (
     <div className="max-w-xl mx-auto">
       <h1 className="text-3xl font-bold mb-2" style={{ fontFamily: "Fraunces, serif" }}>
-        Create a Poll
+        New Poll
       </h1>
-      <p className="mb-8" style={{ color: "var(--muted)" }}>
-        Set your question, add options, then share the link with anyone to vote.
+      <p className="text-sm mb-8" style={{ color: "var(--muted)" }}>
+        Fill in your question and options, then share the link with anyone.
       </p>
 
       {error && (
         <div className="mb-4 px-4 py-3 rounded-xl text-sm font-medium"
-          style={{ background: "var(--error)", color: "#fff" }}>
+          style={{ background: "var(--error, #fee2e2)", color: "#dc2626" }}>
           {error}
         </div>
       )}
 
+      {/* Your name */}
       <div className="mb-5">
-        <label className="block text-sm font-semibold mb-2">Question</label>
+        <label className="block text-sm font-semibold mb-2">Your name (optional)</label>
         <input
           type="text"
-          value={question}
-          onChange={e => setQuestion(e.target.value)}
-          placeholder="What should we decide?"
-          className="w-full px-4 py-3 rounded-xl border text-base outline-none transition-all"
-          style={{
-            borderColor: "var(--line-strong)",
-            background: "var(--paper)",
-            color: "var(--ink)",
-          }}
-          maxLength={200}
+          placeholder="e.g. Alex"
+          value={creatorName}
+          onChange={e => setCreatorName(e.target.value)}
+          className="w-full px-4 py-3 rounded-xl border outline-none text-sm transition-all"
+          style={{ borderColor: "var(--line)", background: "var(--paper)", color: "var(--ink)" }}
         />
       </div>
 
+      {/* Question */}
       <div className="mb-5">
-        <label className="block text-sm font-semibold mb-2">Options</label>
+        <label className="block text-sm font-semibold mb-2">Question *</label>
+        <input
+          type="text"
+          placeholder="e.g. What should we have for lunch?"
+          value={question}
+          onChange={e => setQuestion(e.target.value)}
+          className="w-full px-4 py-3 rounded-xl border outline-none text-sm transition-all"
+          style={{ borderColor: "var(--line)", background: "var(--paper)", color: "var(--ink)" }}
+        />
+      </div>
+
+      {/* Options */}
+      <div className="mb-5">
+        <label className="block text-sm font-semibold mb-2">Options *</label>
         <div className="flex flex-col gap-2">
           {options.map((opt, i) => (
-            <div key={i} className="flex gap-2 items-center">
+            <div key={i} className="flex gap-2">
               <input
                 type="text"
+                placeholder={`Option ${i + 1}`}
                 value={opt}
                 onChange={e => updateOption(i, e.target.value)}
-                placeholder={`Option ${i + 1}`}
-                className="flex-1 px-4 py-2.5 rounded-xl border text-base outline-none"
-                style={{
-                  borderColor: "var(--line-strong)",
-                  background: "var(--paper)",
-                  color: "var(--ink)",
-                }}
-                maxLength={100}
+                className="flex-1 px-4 py-3 rounded-xl border outline-none text-sm"
+                style={{ borderColor: "var(--line)", background: "var(--paper)", color: "var(--ink)" }}
               />
               {options.length > 2 && (
                 <button
                   onClick={() => removeOption(i)}
-                  className="w-9 h-9 rounded-xl flex items-center justify-center text-lg font-bold transition-opacity hover:opacity-70"
+                  className="px-3 py-2 rounded-xl text-sm transition-opacity hover:opacity-70"
                   style={{ background: "var(--line)", color: "var(--muted)" }}
-                  title="Remove option"
                 >
-                  ×
+                  ✕
                 </button>
               )}
             </div>
@@ -114,39 +119,35 @@ export function CreatePoll({ onCreated, username }: CreatePollProps) {
         {options.length < 10 && (
           <button
             onClick={addOption}
-            className="mt-3 px-4 py-2 rounded-xl text-sm font-semibold transition-opacity hover:opacity-70"
-            style={{ background: "var(--line)", color: "var(--accent)" }}
+            className="mt-2 text-sm font-medium transition-opacity hover:opacity-70"
+            style={{ color: "var(--accent)" }}
           >
             + Add option
           </button>
         )}
       </div>
 
-      <div className="mb-8 flex items-center gap-3">
+      {/* Multi-vote toggle */}
+      <div className="flex items-center gap-3 mb-8">
         <button
-          role="checkbox"
-          aria-checked={multiVote}
-          onClick={() => setMultiVote(!multiVote)}
-          className="w-10 h-6 rounded-full transition-colors relative shrink-0"
-          style={{ background: multiVote ? "var(--accent)" : "var(--line-strong)" }}
+          onClick={() => setMultiVote(v => !v)}
+          className="w-10 h-6 rounded-full transition-all relative"
+          style={{ background: multiVote ? "var(--accent)" : "var(--line)" }}
         >
           <span
-            className="absolute top-1 w-4 h-4 rounded-full transition-all"
-            style={{
-              background: "#fff",
-              left: multiVote ? "calc(100% - 1.25rem)" : "0.25rem",
-            }}
+            className="absolute top-1 w-4 h-4 rounded-full bg-white transition-all"
+            style={{ left: multiVote ? "calc(100% - 1.25rem)" : "0.25rem" }}
           />
         </button>
-        <span className="text-sm font-medium">Allow multiple choices per voter</span>
+        <span className="text-sm">Allow multiple selections</span>
       </div>
 
       <button
         onClick={handleCreate}
-        className="w-full py-3.5 rounded-xl font-bold text-base transition-opacity hover:opacity-90"
+        className="w-full py-4 rounded-xl font-bold text-base transition-opacity hover:opacity-90"
         style={{ background: "var(--accent)", color: "#fff" }}
       >
-        Create Poll & Get Link →
+        Create Poll & Get Link
       </button>
     </div>
   );

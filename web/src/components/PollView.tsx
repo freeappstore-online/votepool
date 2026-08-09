@@ -1,46 +1,20 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
 import type { Poll } from "../types";
 
 interface PollViewProps {
   poll: Poll;
-  currentUser: string;
-  isOwner: boolean;
-  onVote: (pollId: string, selections: string[]) => Promise<void>;
-  onClose: (pollId: string) => Promise<void>;
-  onRefresh: (pollId: string) => Promise<Poll | null>;
+  myVote: string[] | null;
+  onVote: (pollId: string, selections: string[], voterName: string) => void;
+  onClose: (pollId: string) => void;
   shareUrl: string;
 }
 
-export function PollView({ poll: initialPoll, currentUser, isOwner, onVote, onClose, onRefresh, shareUrl }: PollViewProps) {
-  const [poll, setPoll] = useState(initialPoll);
-  const [selected, setSelected] = useState<string[]>([]);
-  const [voted, setVoted] = useState(false);
+export function PollView({ poll, myVote, onVote, onClose, shareUrl }: PollViewProps) {
+  const [selected, setSelected] = useState<string[]>(myVote ?? []);
+  const [voted, setVoted] = useState(!!myVote);
   const [copied, setCopied] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [closing, setClosing] = useState(false);
-  const [lastRefresh, setLastRefresh] = useState(Date.now());
-
-  // Check if current user already voted
-  useEffect(() => {
-    if (poll.votes[currentUser]) {
-      setVoted(true);
-      setSelected(poll.votes[currentUser]);
-    }
-  }, [poll, currentUser]);
-
-  // Auto-refresh every 5 seconds
-  const refresh = useCallback(async () => {
-    const updated = await onRefresh(poll.id);
-    if (updated) {
-      setPoll(updated);
-      setLastRefresh(Date.now());
-    }
-  }, [poll.id, onRefresh]);
-
-  useEffect(() => {
-    const interval = setInterval(refresh, 5000);
-    return () => clearInterval(interval);
-  }, [refresh]);
+  const [voterName, setVoterName] = useState("");
+  const [nameError, setNameError] = useState("");
 
   function toggleOption(opt: string) {
     if (poll.multiVote) {
@@ -52,33 +26,20 @@ export function PollView({ poll: initialPoll, currentUser, isOwner, onVote, onCl
     }
   }
 
-  async function handleVote() {
+  function handleVote() {
     if (selected.length === 0) return;
-    setSubmitting(true);
-    await onVote(poll.id, selected);
+    const name = voterName.trim() || "anonymous";
+    onVote(poll.id, selected, name);
     setVoted(true);
-    setSubmitting(false);
-    await refresh();
-  }
-
-  async function handleClose() {
-    setClosing(true);
-    await onClose(poll.id);
-    await refresh();
-    setClosing(false);
   }
 
   function copyLink() {
-    // Try modern clipboard API first, fall back to execCommand
     const doCopy = () => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2500);
     };
-
     if (navigator.clipboard && window.isSecureContext) {
-      navigator.clipboard.writeText(shareUrl).then(doCopy).catch(() => {
-        fallbackCopy();
-      });
+      navigator.clipboard.writeText(shareUrl).then(doCopy).catch(fallbackCopy);
     } else {
       fallbackCopy();
     }
@@ -89,74 +50,53 @@ export function PollView({ poll: initialPoll, currentUser, isOwner, onVote, onCl
     el.value = shareUrl;
     el.style.position = "fixed";
     el.style.top = "-9999px";
-    el.style.left = "-9999px";
     document.body.appendChild(el);
     el.focus();
     el.select();
-    try {
-      document.execCommand("copy");
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2500);
-    } catch {
-      // Last resort: select the text in the URL input so user can copy manually
-    } finally {
-      document.body.removeChild(el);
-    }
+    try { document.execCommand("copy"); setCopied(true); setTimeout(() => setCopied(false), 2500); } catch { /* */ }
+    document.body.removeChild(el);
   }
 
-  // Tally votes
+  // Tally
   const totalVoters = Object.keys(poll.votes).length;
   const tally: Record<string, number> = {};
   poll.options.forEach(o => { tally[o] = 0; });
-  Object.values(poll.votes).forEach(selections => {
-    selections.forEach(s => { if (tally[s] !== undefined) tally[s]++; });
-  });
-
+  Object.values(poll.votes).forEach(sels => sels.forEach(s => { if (tally[s] !== undefined) tally[s]++; }));
   const maxVotes = Math.max(...Object.values(tally), 1);
   const winners = poll.options.filter(o => tally[o] === maxVotes && tally[o] > 0);
-
   const showResults = voted || poll.closed;
-  const secondsAgo = Math.round((Date.now() - lastRefresh) / 1000);
 
   return (
     <div className="max-w-xl mx-auto">
-      {/* Status bar */}
+      {/* Status */}
       <div className="flex items-center gap-2 mb-6">
         <span
           className="px-3 py-1 rounded-full text-xs font-bold"
           style={{
             background: poll.closed ? "var(--line)" : "#dcfce7",
-            color: poll.closed ? "var(--muted)" : "var(--success)",
+            color: poll.closed ? "var(--muted)" : "#16a34a",
           }}
         >
           {poll.closed ? "Closed" : "● Live"}
         </span>
         <span className="text-xs" style={{ color: "var(--muted)" }}>
-          {totalVoters} voter{totalVoters !== 1 ? "s" : ""} · refreshed {secondsAgo}s ago
+          {totalVoters} vote{totalVoters !== 1 ? "s" : ""}
         </span>
-        <button
-          onClick={refresh}
-          className="ml-auto text-xs px-3 py-1 rounded-lg transition-opacity hover:opacity-70"
-          style={{ background: "var(--line)", color: "var(--muted)" }}
-        >
-          ↻ Refresh
-        </button>
       </div>
 
       {/* Question */}
       <h1 className="text-2xl font-bold mb-1" style={{ fontFamily: "Fraunces, serif" }}>
         {poll.question}
       </h1>
-      {!showResults && (
-        <p className="text-sm mb-6" style={{ color: "var(--muted)" }}>
-          {poll.multiVote ? "You can select multiple options." : "Pick one option."}
-        </p>
-      )}
-      {showResults && (
-        <p className="text-sm mb-6" style={{ color: "var(--muted)" }}>
-          {poll.closed ? "Voting is closed." : "You've voted — results update live."}
-        </p>
-      )}
+      <p className="text-sm mb-6" style={{ color: "var(--muted)" }}>
+        {poll.closed
+          ? "Voting is closed."
+          : showResults
+          ? "You've voted — results shown below."
+          : poll.multiVote
+          ? "Select one or more options."
+          : "Pick one option."}
+      </p>
 
       {/* Winner banner */}
       {poll.closed && winners.length > 0 && totalVoters > 0 && (
@@ -176,7 +116,7 @@ export function PollView({ poll: initialPoll, currentUser, isOwner, onVote, onCl
           const barPct = maxVotes > 0 ? Math.round((count / maxVotes) * 100) : 0;
           const isWinner = poll.closed && winners.includes(opt) && totalVoters > 0;
           const isSelected = selected.includes(opt);
-          const myVote = poll.votes[currentUser]?.includes(opt);
+          const myChoice = (myVote ?? selected)?.includes(opt);
 
           return (
             <button
@@ -185,36 +125,24 @@ export function PollView({ poll: initialPoll, currentUser, isOwner, onVote, onCl
               disabled={showResults || poll.closed}
               className="relative w-full text-left px-4 py-3.5 rounded-2xl border-2 overflow-hidden transition-all"
               style={{
-                borderColor: isSelected && !showResults
-                  ? "var(--accent)"
-                  : isWinner
-                  ? "var(--accent)"
-                  : myVote && showResults
-                  ? "var(--accent)"
-                  : "var(--line)",
+                borderColor: isSelected && !showResults ? "var(--accent)" : isWinner ? "var(--accent)" : myChoice && showResults ? "var(--accent)" : "var(--line)",
                 background: "var(--paper)",
                 cursor: showResults || poll.closed ? "default" : "pointer",
               }}
             >
-              {/* Progress bar fill */}
               {showResults && (
                 <span
                   className="absolute inset-y-0 left-0 transition-all duration-500"
-                  style={{
-                    width: `${barPct}%`,
-                    background: isWinner ? "var(--accent)" : "var(--line)",
-                    opacity: 0.15,
-                  }}
+                  style={{ width: `${barPct}%`, background: isWinner ? "var(--accent)" : "var(--line)", opacity: 0.15 }}
                 />
               )}
-
               <span className="relative flex items-center justify-between gap-2">
                 <span className="flex items-center gap-2 font-medium">
                   {!showResults && (
                     <span
                       className="w-5 h-5 rounded-full border-2 shrink-0 flex items-center justify-center text-xs"
                       style={{
-                        borderColor: isSelected ? "var(--accent)" : "var(--line-strong)",
+                        borderColor: isSelected ? "var(--accent)" : "var(--line)",
                         background: isSelected ? "var(--accent)" : "transparent",
                         color: "#fff",
                       }}
@@ -222,12 +150,9 @@ export function PollView({ poll: initialPoll, currentUser, isOwner, onVote, onCl
                       {isSelected ? "✓" : ""}
                     </span>
                   )}
-                  {isWinner && "🏆 "}
-                  {opt}
-                  {myVote && showResults && (
-                    <span className="text-xs font-normal" style={{ color: "var(--accent)" }}>
-                      (your vote)
-                    </span>
+                  {isWinner && "🏆 "}{opt}
+                  {myChoice && showResults && (
+                    <span className="text-xs font-normal" style={{ color: "var(--accent)" }}>(your vote)</span>
                   )}
                 </span>
                 {showResults && (
@@ -241,21 +166,30 @@ export function PollView({ poll: initialPoll, currentUser, isOwner, onVote, onCl
         })}
       </div>
 
-      {/* Vote button */}
+      {/* Vote form */}
       {!voted && !poll.closed && (
-        <button
-          onClick={handleVote}
-          disabled={selected.length === 0 || submitting}
-          className="w-full py-3.5 rounded-xl font-bold text-base mb-4 transition-opacity"
-          style={{
-            background: selected.length === 0 ? "var(--line)" : "var(--accent)",
-            color: selected.length === 0 ? "var(--muted)" : "#fff",
-            opacity: submitting ? 0.6 : 1,
-            cursor: selected.length === 0 ? "not-allowed" : "pointer",
-          }}
-        >
-          {submitting ? "Submitting…" : "Cast Vote"}
-        </button>
+        <div className="mb-4">
+          <input
+            type="text"
+            placeholder="Your name (optional)"
+            value={voterName}
+            onChange={e => { setVoterName(e.target.value); setNameError(""); }}
+            className="w-full px-4 py-3 rounded-xl border mb-3 text-sm outline-none"
+            style={{ borderColor: nameError ? "var(--error)" : "var(--line)", background: "var(--paper)", color: "var(--ink)" }}
+          />
+          <button
+            onClick={handleVote}
+            disabled={selected.length === 0}
+            className="w-full py-3.5 rounded-xl font-bold text-base transition-opacity"
+            style={{
+              background: selected.length === 0 ? "var(--line)" : "var(--accent)",
+              color: selected.length === 0 ? "var(--muted)" : "#fff",
+              cursor: selected.length === 0 ? "not-allowed" : "pointer",
+            }}
+          >
+            Cast Vote
+          </button>
+        </div>
       )}
 
       {/* Share link */}
@@ -274,29 +208,25 @@ export function PollView({ poll: initialPoll, currentUser, isOwner, onVote, onCl
           type="button"
           onClick={copyLink}
           className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
-          style={{
-            background: copied ? "var(--success)" : "var(--accent)",
-            color: "#fff",
-          }}
+          style={{ background: copied ? "#16a34a" : "var(--accent)", color: "#fff" }}
         >
           {copied ? "✓ Copied!" : "Copy Link"}
         </button>
       </div>
 
-      {/* Owner controls */}
-      {isOwner && !poll.closed && (
+      {/* Close poll */}
+      {!poll.closed && (
         <button
-          onClick={handleClose}
-          disabled={closing}
+          onClick={() => onClose(poll.id)}
           className="w-full py-3 rounded-xl font-semibold text-sm transition-opacity hover:opacity-80"
-          style={{ background: "var(--line)", color: "var(--ink)", opacity: closing ? 0.6 : 1 }}
+          style={{ background: "var(--line)", color: "var(--ink)" }}
         >
-          {closing ? "Closing…" : "🔒 Close Poll & Declare Winner"}
+          🔒 Close Poll & Declare Winner
         </button>
       )}
 
       <p className="mt-4 text-xs text-center" style={{ color: "var(--muted)" }}>
-        Created by @{poll.createdBy}
+        Created by {poll.createdBy} · {new Date(poll.createdAt).toLocaleDateString()}
       </p>
     </div>
   );
