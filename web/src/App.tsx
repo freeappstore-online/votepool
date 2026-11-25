@@ -22,7 +22,8 @@ function encodePoll(poll: Poll): string {
 // Decode poll from base64 string
 function decodePoll(encoded: string): Poll | null {
   try {
-    return JSON.parse(decodeURIComponent(escape(atob(encoded))));
+    // Older links carried raw base64, whose "+" reads back as a space.
+    return JSON.parse(decodeURIComponent(escape(atob(encoded.replace(/ /g, "+")))));
   } catch {
     return null;
   }
@@ -30,7 +31,7 @@ function decodePoll(encoded: string): Poll | null {
 
 function getShareUrl(poll: Poll): string {
   const encoded = encodePoll(poll);
-  return `${window.location.origin}${window.location.pathname}?poll=${encoded}`;
+  return `${window.location.origin}${window.location.pathname}?poll=${encodeURIComponent(encoded)}`;
 }
 
 function getPollFromUrl(): Poll | null {
